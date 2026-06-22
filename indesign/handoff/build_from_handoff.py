@@ -6,8 +6,8 @@ recreates the 50-page US Letter landscape document in InDesign with exact image
 placement, text frames, and K-only swatches.
 
 Usage:
-    python indesign/handoff/build_from_handoff.py C:\path\to\handoff_package
-    python indesign/handoff/build_from_handoff.py C:\path\to\handoff_package --execute
+    python indesign/handoff/build_from_handoff.py C:\\path\\to\\handoff_package
+    python indesign/handoff/build_from_handoff.py C:\\path\\to\\handoff_package --execute
 
 The handoff directory must contain:
     master_production_manifest.json
@@ -145,9 +145,9 @@ def _build_page_data(manifest: dict, asset_dir: Path) -> list[dict]:
 
 def _generate_jsx(pages: list[dict], asset_dir: Path) -> str:
     """Generate the complete InDesign ExtendScript."""
-    output_indd = (ROUTE / "output" / "indesign" / "the-visceral-theory-of-sight-50pp-handoff.indd").as_posix()
-    output_idml = (ROUTE / "output" / "indesign" / "the-visceral-theory-of-sight-50pp-handoff.idml").as_posix()
-    output_pdf = (ROUTE / "output" / "pdf" / "the-visceral-theory-of-sight-50pp-handoff.pdf").as_posix()
+    output_indd = (OUTPUT_ROOT / "output" / "indesign" / "the-visceral-theory-of-sight-50pp-handoff.indd").as_posix()
+    output_idml = (OUTPUT_ROOT / "output" / "indesign" / "the-visceral-theory-of-sight-50pp-handoff.idml").as_posix()
+    output_pdf = (OUTPUT_ROOT / "output" / "pdf" / "the-visceral-theory-of-sight-50pp-handoff.pdf").as_posix()
     output_report = (REPORTS_OUT / "handoff-build-indesign-report.json").as_posix()
 
     # Build PAGE_DATA array as JSON for embedding
@@ -470,8 +470,8 @@ def generate_handoff_jsx(handoff_dir: Path) -> Path:
     """Main entry: load manifest, copy assets, generate JSX."""
     TEMPLATE_OUT.mkdir(parents=True, exist_ok=True)
     REPORTS_OUT.mkdir(parents=True, exist_ok=True)
-    (ROUTE / "output" / "indesign").mkdir(parents=True, exist_ok=True)
-    (ROUTE / "output" / "pdf").mkdir(parents=True, exist_ok=True)
+    (OUTPUT_ROOT / "output" / "indesign").mkdir(parents=True, exist_ok=True)
+    (OUTPUT_ROOT / "output" / "pdf").mkdir(parents=True, exist_ok=True)
 
     print("Loading handoff manifest...")
     manifest = load_manifest(handoff_dir)
