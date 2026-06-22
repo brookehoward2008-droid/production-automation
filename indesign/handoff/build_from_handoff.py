@@ -194,14 +194,22 @@ def _generate_jsx(pages: list[dict], asset_dir: Path) -> str:
 
     // --- Swatch helpers (K-only: Black and Paper) ---
     function getBlack(doc) {{
-      try {{ return doc.swatches.itemByName("[Black]"); }} catch (e) {{}}
-      try {{ return doc.swatches.itemByName("Black"); }} catch (e) {{}}
-      return doc.swatches.item(0);
+      try {{
+        var s = doc.swatches.itemByName("[Black]");
+        if (s.isValid) return s;
+      }} catch (e) {{}}
+      try {{
+        var s2 = doc.colors.itemByName("Black");
+        if (s2.isValid) return s2;
+      }} catch (e) {{}}
+      return "Black";
     }}
     function getPaper(doc) {{
-      try {{ return doc.swatches.itemByName("[Paper]"); }} catch (e) {{}}
-      try {{ return doc.swatches.itemByName("Paper"); }} catch (e) {{}}
-      return doc.swatches.item(1);
+      try {{
+        var s = doc.swatches.itemByName("[Paper]");
+        if (s.isValid) return s;
+      }} catch (e) {{}}
+      return "Paper";
     }}
 
     // --- Frame helpers ---
@@ -228,8 +236,8 @@ def _generate_jsx(pages: list[dict], asset_dir: Path) -> str:
           rect.fit(FitOptions.FILL_PROPORTIONALLY);
           rect.fit(FitOptions.CENTER_CONTENT);
         }} else {{
-          rect.fillColor = getBlack(doc);
-          rect.transparencySettings.blendingSettings.opacity = 20;
+          try {{ rect.fillColor = getBlack(doc); }} catch (e3) {{}}
+          try {{ rect.transparencySettings.blendingSettings.opacity = 20; }} catch (e4) {{}}
         }}
       }} catch (e) {{
         try {{ rect.fillColor = getBlack(doc); }} catch (e2) {{}}
