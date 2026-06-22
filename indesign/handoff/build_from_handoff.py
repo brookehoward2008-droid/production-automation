@@ -250,29 +250,56 @@ def _generate_jsx(pages: list[dict], asset_dir: Path) -> str:
       tf.geometricBounds = pageBounds(page, bounds);
       tf.contents = text;
       try {{
-        tf.textFramePreferences.insetSpacing = ["2mm", "2mm", "2mm", "2mm"];
+        tf.textFramePreferences.insetSpacing = ["1.5mm", "2mm", "1.5mm", "2mm"];
         tf.textFramePreferences.verticalJustification = VerticalJustification.TOP_ALIGN;
         tf.textFramePreferences.autoSizingReferencePoint = AutoSizingReferenceEnum.TOP_LEFT_POINT;
-        tf.textFramePreferences.autoSizingType = AutoSizingTypeEnum.HEIGHT_ONLY;
+        tf.textFramePreferences.autoSizingType = AutoSizingTypeEnum.HEIGHT_AND_WIDTH_PROPORTIONALLY;
         tf.texts[0].appliedFont = app.fonts.item("Helvetica");
         tf.texts[0].fontStyle = fontStyle || "Regular";
         tf.texts[0].pointSize = size;
-        tf.texts[0].leading = size * 1.22;
+        tf.texts[0].leading = size * 1.2;
         tf.texts[0].fillColor = swatch;
+        tf.texts[0].tracking = -5;
       }} catch (e) {{}}
-      fitText(tf, 6.5);
+      fitText(tf, 5.5);
       return tf;
     }}
 
     function fitText(tf, minSize) {{
       var attempts = 0;
-      while (tf.overflows && attempts < 20) {{
+      // Phase 1: reduce point size
+      while (tf.overflows && attempts < 30) {{
         try {{
           var txt = tf.texts[0];
-          txt.pointSize = Math.max(minSize, txt.pointSize - 0.3);
-          txt.leading = txt.pointSize * 1.22;
+          var newSize = Math.max(minSize, txt.pointSize - 0.4);
+          if (newSize <= minSize && tf.overflows) break;
+          txt.pointSize = newSize;
+          txt.leading = newSize * 1.18;
         }} catch (e) {{ break; }}
         attempts++;
+      }}
+      // Phase 2: tighten tracking if still overset
+      if (tf.overflows) {{
+        try {{
+          var txt2 = tf.texts[0];
+          var trackAttempts = 0;
+          while (tf.overflows && trackAttempts < 15) {{
+            txt2.tracking = Math.max(-50, txt2.tracking - 5);
+            trackAttempts++;
+          }}
+        }} catch (e) {{}}
+      }}
+      // Phase 3: expand frame height if still overset
+      if (tf.overflows) {{
+        try {{
+          var gb = tf.geometricBounds;
+          var expandAttempts = 0;
+          while (tf.overflows && expandAttempts < 10) {{
+            gb = tf.geometricBounds;
+            tf.geometricBounds = [gb[0], gb[1], gb[2] + "3mm", gb[3]];
+            expandAttempts++;
+          }}
+        }} catch (e) {{}}
       }}
     }}
 
@@ -447,14 +474,22 @@ def _generate_jsx(pages: list[dict], asset_dir: Path) -> str:
 
       // Page number
       var pageNumStr = ("0" + (p + 1)).slice(-2);
-      textFrame(page, [{TRIM_H_MM - 12}, {TRIM_W_MM / 2 - 5}, {TRIM_H_MM - 4}, {TRIM_W_MM / 2 + 5}], pageNumStr, 6.5, "Regular", ink);
+      textFrame(page, [{TRIM_H_MM - 14}, {TRIM_W_MM - 30}, {TRIM_H_MM - 4}, {TRIM_W_MM - 8}], pageNumStr, 7, "Regular", ink);
     }}
 
-    // Final overset guard
+    // Final overset guard - aggressive pass
     for (var i = 0; i < doc.textFrames.length; i++) {{
       try {{
         if (doc.textFrames[i].isValid && doc.textFrames[i].overflows) {{
-          fitText(doc.textFrames[i], 6.5);
+          fitText(doc.textFrames[i], 5.0);
+        }}
+      }} catch (e) {{}}
+    }}
+    // Second pass: enable auto-size on any remaining overset frames
+    for (var j = 0; j < doc.textFrames.length; j++) {{
+      try {{
+        if (doc.textFrames[j].isValid && doc.textFrames[j].overflows) {{
+          doc.textFrames[j].textFramePreferences.autoSizingType = AutoSizingTypeEnum.HEIGHT_AND_WIDTH_PROPORTIONALLY;
         }}
       }} catch (e) {{}}
     }}
@@ -474,7 +509,7 @@ def _generate_jsx(pages: list[dict], asset_dir: Path) -> str:
     return jsx
 
 
-def generate_handoff_jsx(handoff_dir: Path) -> Path:
+def generate_handoff_jsx(handoff_dir: Path, images_override: Path | None = None) -> Path:
     """Main entry: load manifest, copy assets, generate JSX."""
     TEMPLATE_OUT.mkdir(parents=True, exist_ok=True)
     REPORTS_OUT.mkdir(parents=True, exist_ok=True)
@@ -488,6 +523,17 @@ def generate_handoff_jsx(handoff_dir: Path) -> Path:
 
     print("Copying handoff assets...")
     asset_dir = copy_handoff_assets(handoff_dir)
+
+    # If images_override is set, copy those images into asset_dir too
+    if images_override and images_override.is_dir():
+        print(f"  Overlaying images from: {images_override}")
+        override_count = 0
+        for img_file in sorted(images_override.iterdir()):
+            if img_file.suffix.lower() in (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".psd"):
+                dest = asset_dir / img_file.name
+                shutil.copy2(img_file, dest)
+                override_count += 1
+        print(f"  Copied {override_count} override images")
 
     print("Building page data...")
     pages = _build_page_data(manifest, asset_dir)
@@ -567,6 +613,8 @@ def main() -> int:
     parser.add_argument("handoff_dir", help="Path to unzipped handoff package folder")
     parser.add_argument("--execute", action="store_true",
                         help="Execute the JSX directly in InDesign via COM (Windows only)")
+    parser.add_argument("--images-dir", default="",
+                        help="Override image source directory (use local images instead of handoff assets)")
     args = parser.parse_args()
 
     handoff_dir = Path(args.handoff_dir).resolve()
@@ -574,7 +622,12 @@ def main() -> int:
         print(f"ERROR: not a directory: {handoff_dir}")
         return 1
 
-    jsx_path = generate_handoff_jsx(handoff_dir)
+    images_override = Path(args.images_dir).resolve() if args.images_dir else None
+    if images_override and not images_override.is_dir():
+        print(f"WARNING: images-dir not found: {images_override}, using handoff assets")
+        images_override = None
+
+    jsx_path = generate_handoff_jsx(handoff_dir, images_override=images_override)
     print(f"\nJSX generated: {jsx_path}")
 
     if args.execute:
