@@ -6,17 +6,16 @@ recreates the 50-page US Letter landscape document in InDesign with exact image
 placement, text frames, and K-only swatches.
 
 Usage:
-    python scripts/build_from_handoff.py /path/to/handoff_package
+    python indesign/handoff/build_from_handoff.py C:\path\to\handoff_package
+    python indesign/handoff/build_from_handoff.py C:\path\to\handoff_package --execute
 
 The handoff directory must contain:
     master_production_manifest.json
     production_layout_instructions.csv
-    assets/  (73 PNG page extracts)
+    assets/  (PNG page extracts)
 
-Outputs (under visceral-production-route/):
-    templates/indesign-handoff-build.jsx
-    reports/handoff-build-generator-report.json
-    assets/handoff/  (copied PNGs ready for InDesign linking)
+With --execute: generates JSX AND runs it in InDesign via COM (Windows only).
+Without --execute: generates JSX file only (you run it manually in InDesign).
 """
 from __future__ import annotations
 
@@ -27,16 +26,28 @@ import sys
 from pathlib import Path
 from textwrap import dedent
 
-try:
-    from scripts import build_visceral_book as book
-except ModuleNotFoundError:
-    import build_visceral_book as book
+import os
+import platform
 
-ROOT = Path(__file__).resolve().parents[1]
-ROUTE = ROOT / "visceral-production-route"
-TEMPLATE_OUT = ROUTE / "templates"
-REPORTS_OUT = ROUTE / "reports"
-HANDOFF_ASSET_DIR = ROUTE / "assets" / "handoff"
+ROOT = Path(__file__).resolve().parents[2]  # production-automation root
+
+
+def _get_output_root() -> Path:
+    """Output location - configurable via env var, defaults to safe local dir."""
+    env = os.environ.get("PRODUCTION_OUTPUT_DIR")
+    if env:
+        return Path(env)
+    if platform.system() == "Windows":
+        home = Path(os.environ.get("USERPROFILE", "C:\\Users\\Default"))
+    else:
+        home = Path.home()
+    return home / "Production-Automation-Output" / "InDesign"
+
+
+OUTPUT_ROOT = _get_output_root()
+TEMPLATE_OUT = OUTPUT_ROOT / "templates"
+REPORTS_OUT = OUTPUT_ROOT / "reports"
+HANDOFF_ASSET_DIR = OUTPUT_ROOT / "assets" / "handoff"
 
 # US Letter landscape with 0.125in bleed
 TRIM_W_MM = 279.4
@@ -506,23 +517,74 @@ def generate_handoff_jsx(handoff_dir: Path) -> Path:
     return output_jsx
 
 
-def main() -> int:
-    if len(sys.argv) < 2:
-        print("Usage: python scripts/build_from_handoff.py /path/to/handoff_package")
-        print("  The directory must contain master_production_manifest.json,")
-        print("  production_layout_instructions.csv, and assets/")
-        return 1
+def execute_jsx_in_indesign(jsx_path: Path) -> str:
+    """Execute a JSX file in InDesign via COM (Windows only)."""
+    if platform.system() != "Windows":
+        raise RuntimeError("COM execution requires Windows. Run the .jsx manually in InDesign.")
 
-    handoff_dir = Path(sys.argv[1]).resolve()
+    import win32com.client
+
+    JAVASCRIPT = 1246973031
+    NEVER_INTERACT = 1699640946
+    PROGIDS = [
+        "InDesign.Application",
+        "InDesign.Application.CC.2024",
+        "InDesign.Application.2024",
+        "InDesign.Application.CC.2023",
+    ]
+
+    app = None
+    for progid in PROGIDS:
+        try:
+            app = win32com.client.Dispatch(progid)
+            break
+        except Exception:
+            continue
+
+    if app is None:
+        raise RuntimeError("Could not connect to InDesign. Is it running?")
+
+    print(f"  Connected to InDesign {app.Version}")
+    app.ScriptPreferences.UserInteractionLevel = NEVER_INTERACT
+
+    jsx_code = jsx_path.read_text(encoding="utf-8")
+    print(f"  Executing {len(jsx_code)} chars of JSX...")
+    result = app.DoScript(jsx_code, JAVASCRIPT)
+    return str(result) if result else "(completed)"
+
+
+def main() -> int:
+    import argparse
+    parser = argparse.ArgumentParser(description="Build InDesign doc from handoff package")
+    parser.add_argument("handoff_dir", help="Path to unzipped handoff package folder")
+    parser.add_argument("--execute", action="store_true",
+                        help="Execute the JSX directly in InDesign via COM (Windows only)")
+    args = parser.parse_args()
+
+    handoff_dir = Path(args.handoff_dir).resolve()
     if not handoff_dir.is_dir():
         print(f"ERROR: not a directory: {handoff_dir}")
         return 1
 
     jsx_path = generate_handoff_jsx(handoff_dir)
-    print(f"\nDone. To build in InDesign, run the generated script:")
-    print(f"  {jsx_path}")
-    print(f"\nOr use the COM bridge on Windows:")
-    print(f"  python scripts/run_indesign_autobuild.py --handoff {handoff_dir}")
+    print(f"\nJSX generated: {jsx_path}")
+
+    if args.execute:
+        print("\nExecuting in InDesign...")
+        try:
+            result = execute_jsx_in_indesign(jsx_path)
+            print(f"  Result: {result}")
+            print("\nBuild complete! Check InDesign for your document.")
+        except Exception as e:
+            print(f"  ERROR: {e}")
+            print(f"\nYou can still run the JSX manually:")
+            print(f"  InDesign > File > Scripts > Other Script... > {jsx_path}")
+            return 1
+    else:
+        print(f"\nTo build in InDesign, either:")
+        print(f"  1. Run again with --execute flag")
+        print(f"  2. Open in InDesign: File > Scripts > Other Script... > {jsx_path}")
+
     return 0
 
 
